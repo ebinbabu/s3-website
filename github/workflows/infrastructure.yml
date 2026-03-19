@@ -1,0 +1,103 @@
+name: Infrastructure Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 's3/**'
+      - 'cloudfront/**'
+      - 'env/**'
+      - '.github/workflows/infrastructure.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 's3/**'
+      - 'cloudfront/**'
+      - 'env/**'
+
+env:
+  AWS_REGION: ap-south-1
+  TF_VERSION: 1.14.0
+  ENV: dev
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # S3 Stack
+      - name: S3 - Init
+        run: terraform init -backend-config=backend/${{ env.ENV }}.conf
+        working-directory: s3
+
+      - name: S3 - Plan
+        run: terraform plan -var-file=../env/${{ env.ENV }}.tfvars -out=s3.tfplan
+        working-directory: s3
+
+      # CloudFront Stack
+      - name: CloudFront - Init
+        run: terraform init -backend-config=backend/${{ env.ENV }}.conf
+        working-directory: cloudfront
+
+      - name: CloudFront - Plan
+        run: terraform plan -var-file=../env/${{ env.ENV }}.tfvars -out=cf.tfplan
+        working-directory: cloudfront
+
+      - name: Upload Plans
+        uses: actions/upload-artifact@v4
+        with:
+          name: tf-plans
+          path: |
+            s3/s3.tfplan
+            s3/.terraform
+            s3/.terraform.lock.hcl
+            cloudfront/cf.tfplan
+            cloudfront/.terraform
+            cloudfront/.terraform.lock.hcl
+
+  apply:
+    name: Terraform Apply
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Download Plans
+        uses: actions/download-artifact@v4
+        with:
+          name: tf-plans
+
+      - name: S3 - Apply
+        run: terraform apply -auto-approve s3.tfplan
+        working-directory: s3
+
+      - name: CloudFront - Apply
+        run: terraform apply -auto-approve cf.tfplan
+        working-directory: cloudfront
