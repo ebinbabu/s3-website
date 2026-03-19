@@ -1,0 +1,50 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: S3 bucket for Terraform state with native S3 state locking (object lock)
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket for Terraform state
+  NoncurrentVersionExpirationDays:
+    Type: Number
+    Default: 90
+    Description: Days to retain noncurrent state file versions
+
+Resources:
+  TerraformStateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete # Retain or Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketName: !Ref BucketName
+      ObjectLockEnabled: true
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireNoncurrentVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref NoncurrentVersionExpirationDays
+      Tags:
+        - Key: Purpose
+          Value: ebin-demo-terraform-state
+        - Key: Cloudformation
+          Value: true
+        - Key: Owner
+          Value: Ebin
+
+Outputs:
+  BucketName:
+    Value: !Ref TerraformStateBucket
+  BucketArn:
+    Value: !GetAtt TerraformStateBucket.Arn
